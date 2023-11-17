@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from tempfile import mkdtemp
+import time
 
 # Set up Chrome WebDriver
 options = webdriver.ChromeOptions()
@@ -23,6 +24,11 @@ options.add_argument("--remote-debugging-port=9222")
 
 driver = webdriver.Chrome(options=options, service=service)
 
+def get_page_load_time(driver):
+    navigation_start = driver.execute_script("return window.performance.timing.navigationStart;")
+    load_event_end = driver.execute_script("return window.performance.timing.loadEventEnd;")
+    page_load_time = (load_event_end - navigation_start) / 1000.0  # Convert to seconds
+    return page_load_time
 
 def handler(event, context):
     # Extract URL from the event
@@ -38,6 +44,7 @@ def handler(event, context):
     try:
         # Open the provided URL in the browser
         driver.get(url)
+        page_load_time = get_page_load_time(driver)
 
         # Fetch all links on the page
         links = driver.find_elements(by=By.TAG_NAME, value="a")
@@ -45,6 +52,7 @@ def handler(event, context):
         
         return {
             'site-available': True,
+            'page-load-time': page_load_time,
             'body': link_texts
         }
 
