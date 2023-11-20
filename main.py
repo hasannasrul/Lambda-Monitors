@@ -1,10 +1,7 @@
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
 from tempfile import mkdtemp
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import subprocess
 from urllib.parse import urlparse
 import requests
 import boto3
@@ -14,9 +11,38 @@ from datetime import datetime
 
 s3 = boto3.client('s3')
 
+######################     Some utility functions    ############################################
+
+def upload_logs_to_s3(logs, bucket_name, key):
+    logs_str = json.dumps(logs, indent=2)
+    s3.put_object(Body=logs_str, Bucket=bucket_name, Key=key)
+
+def extract_domain_from_url(url):
+        parsed_url = urlparse(url)
+        return parsed_url.netloc
+
+# External URLs are those url which are not in sitemap.xml
+def get_external_url(urls,website_domain):
+    external_urls = []
+    for url in urls:
+        parsed_url = urlparse(url)
+        # Check if the netloc (domain) of the parsed URL is different from the website's domain
+        if parsed_url.netloc and parsed_url.netloc != website_domain:
+            external_urls.append(url)
+    return external_urls
+
+############### Monitor class to implement monitoring features ##############################
+
 class Monitor():
     def __init__(self, driver):
         self.driver = driver
+
+    def get_page_availability(self,url):
+        try:
+            self.driver.get(url)
+            return True
+        except:
+            return False
 
     def get_page_load_time(self):
         navigation_start = self.driver.execute_script("return window.performance.timing.navigationStart;")
@@ -27,62 +53,22 @@ class Monitor():
     def check_console_errors(self):
         console_errors = self.driver.get_log("browser")
         return console_errors
-    
-    # External URLs are those url which will take away from website
-    def get_external_url(self,urls,website_domain):
-        external_urls = []
-        for url in urls:
-            parsed_url = urlparse(url)
-            # Check if the netloc (domain) of the parsed URL is different from the website's domain
-            if parsed_url.netloc and parsed_url.netloc != website_domain:
-                external_urls.append(url)
-        return external_urls
 
-    def ping_url(self,urls):
-        results = {}
-
+    def ping_external_url(self, urls):
+        results = []
         for url in urls:
             try:
                 response = requests.head(url, timeout=10)
                 # Raise an error for bad responses (4xx or 5xx) else return None
                 response.raise_for_status()  
                 ## Website is up so its a choice to whether return something or not 
-                # results[url] = None 
+                # results.append({url: None})
             except requests.RequestException as e:
-                results[url] = str(e)  # Return the error if the request fails
+                results.append({url: str(e)})  # Return the error if the request fails
+                
+        return results        
 
-        return results
-
-    def check_url(self, url, timeout=10):
-        try:
-            self.driver.set_page_load_timeout(timeout)
-            self.driver.get(url)
-            # Check the HTTP status code
-            status_code = self.driver.execute_script("return window.performance.getEntries()[0].response.status")
-            if status_code == 200 or status_code == 403:
-                return None  # Website is up
-            else:
-                return { url : status_code }
-        except TimeoutException:
-            return { url : "Timeout" }  # Timeout occurred, URL might be down or slow to respond
-        except Exception as e:
-            return { url : str(e) }  # Other exceptions, URL is likely broken
-
-    def check_urls(self, urls, timeout=10):
-        with ThreadPoolExecutor() as executor:
-            # Create a list of futures for each URL
-            futures = [executor.submit(self.check_url, url, timeout) for url in urls]
-            # Collect broken URLs
-            broken_urls = [future.result() for future in as_completed(futures) if future.result() is not None]
-            return broken_urls
-        
-    def extract_domain_from_url(self,url):
-        parsed_url = urlparse(url)
-        return parsed_url.netloc
-    
-def upload_logs_to_s3(logs, bucket_name, key):
-    logs_str = json.dumps(logs, indent=2)
-    s3.put_object(Body=logs_str, Bucket=bucket_name, Key=key)
+############### Actual Lambda Handler function ##############################
 
 def handler(event, context):
     # Extract URL from the event
@@ -120,8 +106,9 @@ def handler(event, context):
 
         # create a monitor class instance
         monitor = Monitor(driver)
+
         # 1. Open the provided URL in the browser
-        driver.get(url)
+        is_available = monitor.get_page_availability(url)
 
         # 2. Check Page Load Time
         page_load_time = monitor.get_page_load_time()
@@ -132,24 +119,20 @@ def handler(event, context):
         # 4. Fetch all links on the page to Check external links for being broken
         links = driver.find_elements(by=By.TAG_NAME, value="a")
         link_texts = [link.get_attribute('href') for link in links if link.get_attribute('href').strip()]
+
         # get domain from event url so that we can separate external and internal url by comparing
-        website_domain = monitor.extract_domain_from_url(url)
+        website_domain = extract_domain_from_url(url)
 
-        # Separate External and Internal URL
-        external_urls = monitor.get_external_url(link_texts, website_domain)
-        internal_urls = list(filter(lambda x: x not in external_urls, link_texts))
-
-        # Check if all the pages in website are accesible
-        internal_broken_links = monitor.check_urls(internal_urls)
+        # Separate External from internal urls/sitemaps.xml
+        external_urls = get_external_url(link_texts, website_domain)
 
         # Ping all the external url
-        external_broken_links = monitor.ping_url(external_urls)
+        external_broken_links = monitor.ping_external_url(external_urls)
 
         logs = {
-            'site-available': True,
+            'site-available': is_available,
             'page-load-time': page_load_time,
             'console-logs': console_errors,
-            'internal-broken-links': internal_broken_links,
             'external-broken-link': external_broken_links,
             'links-texts': link_texts
         }
@@ -161,7 +144,8 @@ def handler(event, context):
 
         return {
             'statusCode': 200,
-            'body': 'Success'
+            'body': 'Success',
+            'logs': logs
         }
 
     finally:
