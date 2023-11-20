@@ -1,6 +1,7 @@
 # Run Selenium in AWS Lambda
 
-This is a basic repository to setup selenium for AWS Lambda Function
+This is a repository to setup selenium for AWS Lambda Function. It will Monitor website passed
+as a event to this function and store the logs to AWS S3.
 
 # Pre-requistes
 
@@ -45,6 +46,10 @@ docker push <AWS-Account-ID>.dkr.ecr.us-east-1.amazonaws.com/<your-repo-name>:la
 5. Select image which we created above from browse image option
 6. Create a role for Lambda function to access ECR and all the permission required for your usecase
 7. Deploy the funcion
+8. Edit environment variable under configuration
+```
+S3_BUCKET_NAME=<your-bucket-name>
+```
 
 ### Test Function
 Pass the url as a json

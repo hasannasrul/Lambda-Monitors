@@ -4,7 +4,15 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException
 from tempfile import mkdtemp
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import subprocess
+from urllib.parse import urlparse
+import requests
+import boto3
+import os
+import json
+from datetime import datetime
 
+s3 = boto3.client('s3')
 
 class Monitor():
     def __init__(self, driver):
@@ -19,6 +27,31 @@ class Monitor():
     def check_console_errors(self):
         console_errors = self.driver.get_log("browser")
         return console_errors
+    
+    # External URLs are those url which will take away from website
+    def get_external_url(self,urls,website_domain):
+        external_urls = []
+        for url in urls:
+            parsed_url = urlparse(url)
+            # Check if the netloc (domain) of the parsed URL is different from the website's domain
+            if parsed_url.netloc and parsed_url.netloc != website_domain:
+                external_urls.append(url)
+        return external_urls
+
+    def ping_url(self,urls):
+        results = {}
+
+        for url in urls:
+            try:
+                response = requests.head(url, timeout=10)
+                # Raise an error for bad responses (4xx or 5xx) else return None
+                response.raise_for_status()  
+                ## Website is up so its a choice to whether return something or not 
+                # results[url] = None 
+            except requests.RequestException as e:
+                results[url] = str(e)  # Return the error if the request fails
+
+        return results
 
     def check_url(self, url, timeout=10):
         try:
@@ -42,6 +75,14 @@ class Monitor():
             # Collect broken URLs
             broken_urls = [future.result() for future in as_completed(futures) if future.result() is not None]
             return broken_urls
+        
+    def extract_domain_from_url(self,url):
+        parsed_url = urlparse(url)
+        return parsed_url.netloc
+    
+def upload_logs_to_s3(logs, bucket_name, key):
+    logs_str = json.dumps(logs, indent=2)
+    s3.put_object(Body=logs_str, Bucket=bucket_name, Key=key)
 
 def handler(event, context):
     # Extract URL from the event
@@ -55,7 +96,7 @@ def handler(event, context):
         }
 
     driver = None  # Initialize the driver variable
-
+    
     try:
         # Set up Chrome WebDriver
         options = webdriver.ChromeOptions()
@@ -79,7 +120,6 @@ def handler(event, context):
 
         # create a monitor class instance
         monitor = Monitor(driver)
-
         # 1. Open the provided URL in the browser
         driver.get(url)
 
@@ -92,16 +132,36 @@ def handler(event, context):
         # 4. Fetch all links on the page to Check external links for being broken
         links = driver.find_elements(by=By.TAG_NAME, value="a")
         link_texts = [link.get_attribute('href') for link in links if link.get_attribute('href').strip()]
+        # get domain from event url so that we can separate external and internal url by comparing
+        website_domain = monitor.extract_domain_from_url(url)
 
-        broken_links = monitor.check_urls(link_texts)
+        # Separate External and Internal URL
+        external_urls = monitor.get_external_url(link_texts, website_domain)
+        internal_urls = list(filter(lambda x: x not in external_urls, link_texts))
 
-        return {
+        # Check if all the pages in website are accesible
+        internal_broken_links = monitor.check_urls(internal_urls)
+
+        # Ping all the external url
+        external_broken_links = monitor.ping_url(external_urls)
+
+        logs = {
             'site-available': True,
             'page-load-time': page_load_time,
-            'console-errors': console_errors,
-            'broken-links': broken_links,
+            'console-logs': console_errors,
+            'internal-broken-links': internal_broken_links,
+            'external-broken-link': external_broken_links,
             'links-texts': link_texts
-            
+        }
+
+        # Upload logs to S3
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        key = f'Monitoring-logs-{timestamp}.json'
+        upload_logs_to_s3(logs, os.environ['S3_BUCKET_NAME'], key)
+
+        return {
+            'statusCode': 200,
+            'body': 'Success'
         }
 
     finally:
