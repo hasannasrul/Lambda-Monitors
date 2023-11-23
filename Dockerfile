@@ -13,6 +13,7 @@ RUN yum install atk cups-libs gtk3 libXcomposite alsa-lib \
 RUN pip install selenium==4.15.2
 RUN pip install requests==2.31.0
 RUN pip install boto3
+RUN pip install Pillow
 COPY --from=build /opt/chrome-linux64 /opt/chrome
 COPY --from=build /opt/chromedriver-linux64 /opt/
 COPY main.py ${LAMBDA_TASK_ROOT}

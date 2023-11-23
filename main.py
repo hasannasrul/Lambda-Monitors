@@ -8,6 +8,9 @@ import boto3
 import os
 import json
 from datetime import datetime
+from io import BytesIO
+from PIL import Image
+
 
 s3 = boto3.client('s3')
 
@@ -37,12 +40,34 @@ class Monitor():
     def __init__(self, driver):
         self.driver = driver
 
-    def get_page_availability(self,url):
+    def get_page_availability(self, url):
         try:
             self.driver.get(url)
-            return True
-        except:
-            return False
+            # Take a screenshot
+            screenshot = self.driver.get_screenshot_as_png()
+            screenshot_image = Image.open(BytesIO(screenshot))
+            # Create a timestamp for the screenshot key
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+
+            screenshot_key = f'evidence/{extract_domain_from_url(url)}_{timestamp}_evidence.png'
+
+            # Save the screenshot locally
+            screenshot_path = f'/tmp/{extract_domain_from_url(url)}_evidence.png'
+            screenshot_image.save(screenshot_path)
+
+            # Upload the screenshot to S3
+            s3.upload_file(screenshot_path, os.environ['S3_BUCKET_NAME'], screenshot_key)
+
+            return True, screenshot_key
+        
+        except Exception as e:
+            # Capture a screenshot even if the URL is not reachable
+            screenshot_key = f'evidence/{extract_domain_from_url(url)}_error_evidence.png'
+            screenshot_path = f'/tmp/{extract_domain_from_url(url)}_{timestamp}_error_evidence.png'
+            self.driver.save_screenshot(screenshot_path)
+            # Upload the screenshot to S3
+            s3.upload_file(screenshot_path, os.environ['S3_BUCKET_NAME'], screenshot_key)
+            return False, screenshot_key
 
     def get_page_load_time(self):
         navigation_start = self.driver.execute_script("return window.performance.timing.navigationStart;")
@@ -108,7 +133,7 @@ def handler(event, context):
         monitor = Monitor(driver)
 
         # 1. Open the provided URL in the browser
-        is_available = monitor.get_page_availability(url)
+        is_available, screenshot_key = monitor.get_page_availability(url)
 
         # 2. Check Page Load Time
         page_load_time = monitor.get_page_load_time()
@@ -131,6 +156,7 @@ def handler(event, context):
 
         logs = {
             'site-available': is_available,
+            'screenshot_url': f'https://{os.environ["S3_BUCKET_NAME"]}.s3.amazonaws.com/{screenshot_key}',
             'page-load-time': page_load_time,
             'console-logs': console_errors,
             'external-broken-link': external_broken_links,
