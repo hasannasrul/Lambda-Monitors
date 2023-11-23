@@ -1,4 +1,4 @@
-# Run Selenium in AWS Lambda
+# Run API Monitor in AWS Lambda
 
 This is a repository to setup API Monitoring using AWS Lambda Function. It will Monitor API passed
 as a event to this function and store the performance logs to AWS S3.
@@ -56,7 +56,12 @@ Pass the url as a json
 
 ```
 {
-  "url": "https://www.pfizer.com"
+  "endpoints": [
+    "https://api.sampleapis.com/rickandmorty/characters",
+    "https://api.sampleapis.com/rickandmorty/episodes",
+    "https://api.sampleapis.com/rickandmorty/locations"
+  ]
 }
+
 ```
 
