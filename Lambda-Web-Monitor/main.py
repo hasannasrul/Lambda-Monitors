@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
+import time
 
 
 s3 = boto3.client('s3')
@@ -47,7 +48,7 @@ class Monitor():
             screenshot = self.driver.get_screenshot_as_png()
             screenshot_image = Image.open(BytesIO(screenshot))
             # Create a timestamp for the screenshot key
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            timestamp = int(time.time() * 1000)
 
             screenshot_key = f'evidence/{extract_domain_from_url(url)}_{timestamp}_evidence.png'
 
@@ -79,18 +80,33 @@ class Monitor():
         console_errors = self.driver.get_log("browser")
         return console_errors
 
-    def ping_external_url(self, urls):
+    def ping_external_url(self,urls):
         results = []
+        session = requests.Session()
+        
         for url in urls:
             try:
-                response = requests.head(url, timeout=10)
-                # Raise an error for bad responses (4xx or 5xx) else return None
-                response.raise_for_status()  
-                ## Website is up so its a choice to whether return something or not 
-                # results.append({url: None})
-            except requests.RequestException as e:
-                results.append({url: str(e)})  # Return the error if the request fails
+                # Create headers mimicking Google Chrome
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Referer': 'https://www.google.com/',
+                }
+
+                # Use the session to make the request
+                response = session.get(url, headers=headers)
                 
+                # If the response code is 2xx, the site is accessible
+                if 200 <= response.status_code < 300:
+                    pass # Append nothing in the result array because site is okay
+                    # results.append({url: None})
+                else:
+                    results.append({url: f"Unexpected response code: {response.status_code}"})
+            
+            except requests.RequestException as e:
+                # Handle request exceptions
+                results.append({url: f"RequestException: {str(e)}"})
+        
         return results        
 
 ############### Actual Lambda Handler function ##############################
@@ -164,7 +180,7 @@ def handler(event, context):
         }
 
         # Upload logs to S3
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        timestamp = int(time.time() * 1000)
         key = f'Monitoring-logs-{timestamp}.json'
         upload_logs_to_s3(logs, os.environ['S3_BUCKET_NAME'], key)
 
