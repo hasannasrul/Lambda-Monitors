@@ -56,10 +56,24 @@ Pass the url as a json
 
 ```
 {
-  "endpoints": [
-    "https://api.sampleapis.com/rickandmorty/characters",
-    "https://api.sampleapis.com/rickandmorty/episodes",
-    "https://api.sampleapis.com/rickandmorty/locations"
+  "API-Test": [
+    {
+      "endpoint": "https://api.sampleapis.com/rickandmorty/characters",
+      "method": "GET"
+    },
+    {
+      "endpoint": "https://api.sampleapis.com/rickandmorty/episodes",
+      "method": "GET"
+    },
+    {
+      "endpoint": "http://petstore.execute-api.eu-north-1.amazonaws.com/petstore/pets",
+      "method": "POST",
+      "body": {
+        "NewPet": "joy",
+        "type": "labrador",
+        "price": 800
+      }
+    }
   ]
 }
 
