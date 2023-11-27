@@ -4,6 +4,7 @@ import os
 import json
 from datetime import datetime
 import time
+import uuid
 
 s3 = boto3.client('s3')
 dynamodb = boto3.client('dynamodb')
@@ -16,6 +17,33 @@ table_name = 'APIResponsesTableNew'
 def upload_logs_to_s3(logs, bucket_name, key):
     logs_str = json.dumps(logs, indent=2)
     s3.put_object(Body=logs_str, Bucket=bucket_name, Key=key)
+
+def write_to_db(api_results):
+    # Save API response data to DynamoDB
+    put_requests = []
+
+    for result in api_results:
+        put_requests.append({
+            'PutRequest': {
+                'Item': {
+                    'ID': {'S': result['_id']},
+                    'Endpoint': {'S': result['endpoint']},
+                    'Method': {'S': result['method']},
+                    'StatusCode': {'N': str(result['status_code'])},
+                    'IsSuccessful': {'BOOL': result['is_successful']},
+                    'ResponseTime': {'N': str(result['response_time'])},
+                    'ResponseHeaders': {'S': json.dumps(result['response_headers'])},
+                    'ResponseBody': {'S': result['response_body']}
+                }
+            }
+        })
+
+    dynamodb.batch_write_item(
+        RequestItems={
+            table_name: put_requests
+        }
+    )
+
 
 ############### Monitor class to implement monitoring features ##############################
 
@@ -44,6 +72,7 @@ class MonitorAPI():
             is_successful = response.ok
             # Log API response details
             api_result = {
+                '_id': str(uuid.uuid4()),
                 'method': method,
                 'endpoint': endpoint,
                 'status_code': response.status_code,
@@ -57,6 +86,7 @@ class MonitorAPI():
         except Exception as e:
             # Log if there's an exception during API request
             api_result = {
+                '_id': str(uuid.uuid4()),
                 'method': method,
                 'endpoint': endpoint,
                 'error': str(e)
@@ -64,7 +94,6 @@ class MonitorAPI():
             return api_result
 
 ############### Actual Lambda Handler function ##############################
-
 def handler(event, context):
     # Extract API tests from the event
     api_tests = event.get('API-Test')
@@ -95,20 +124,6 @@ def handler(event, context):
             result = monitor.test_api(method, endpoint, body)
             api_results.append(result)
 
-            # Save API response data to DynamoDB
-            dynamodb.put_item(
-                TableName=table_name,
-                Item={
-                    'Endpoint': {'S': endpoint},
-                    'Method': {'S': method},
-                    'StatusCode': {'N': str(result['status_code'])},
-                    'IsSuccessful': {'BOOL': result['is_successful']},
-                    'ResponseTime': {'N': str(result['response_time'])},
-                    'ResponseHeaders': {'S': json.dumps(result['response_headers'])},
-                    'ResponseBody': {'S': result['response_body']}
-                }
-            )
-
         except Exception as e:
             # Log any unexpected exception
             error_message = f'Error during API monitoring: {str(e)}'
@@ -121,6 +136,9 @@ def handler(event, context):
     timestamp = int(time.time() * 1000)
     key = f'API-Monitoring-logs-{timestamp}.json'
     upload_logs_to_s3(api_results, os.environ['S3_BUCKET_NAME'], key)
+
+    # Write API response data to DynamoDB
+    write_to_db(api_results)
 
     return {
         'statusCode': 200,
