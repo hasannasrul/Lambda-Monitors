@@ -56,6 +56,7 @@ Pass the url as a json
 
 ```
 {
+  "job_id": "1",
   "API-Test": [
     {
       "endpoint": "https://api.sampleapis.com/rickandmorty/characters",

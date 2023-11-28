@@ -11,11 +11,20 @@ from datetime import datetime
 from io import BytesIO
 from PIL import Image
 import time
+import random
 
 
 s3 = boto3.client('s3')
 
 ######################     Some utility functions    ############################################
+user_agents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Safari/14.0.3',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:95.0) Gecko/20100101 Firefox/95.0',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 15_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 10; SM-A505U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Mobile Safari/537.36'
+]
 
 def upload_logs_to_s3(logs, bucket_name, key):
     logs_str = json.dumps(logs, indent=2)
@@ -88,7 +97,7 @@ class Monitor():
             try:
                 # Create headers mimicking Google Chrome
                 headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.45 Safari/537.36',
+                    'User-Agent': random.choice(user_agents),
                     'Accept-Encoding': 'gzip, deflate, br',
                     'Referer': 'https://www.google.com/',
                 }
@@ -112,7 +121,7 @@ class Monitor():
 ############### Actual Lambda Handler function ##############################
 
 def handler(event, context):
-    # Extract URL from the event
+    # Extract URL,Exception List from the event
     url = event.get('url')
 
     # Check if the URL is provided

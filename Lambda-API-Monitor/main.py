@@ -18,10 +18,10 @@ def upload_logs_to_s3(logs, bucket_name, key):
     logs_str = json.dumps(logs, indent=2)
     s3.put_object(Body=logs_str, Bucket=bucket_name, Key=key)
 
-def write_to_db(api_results):
+def write_to_db(api_results, job_id):
     # Save API response data to DynamoDB
     put_requests = []
-
+    timestamp = int(datetime.now().timestamp())
     for result in api_results:
         put_requests.append({
             'PutRequest': {
@@ -33,7 +33,9 @@ def write_to_db(api_results):
                     'IsSuccessful': {'BOOL': result['is_successful']},
                     'ResponseTime': {'N': str(result['response_time'])},
                     'ResponseHeaders': {'S': json.dumps(result['response_headers'])},
-                    'ResponseBody': {'S': result['response_body']}
+                    'ResponseBody': {'S': result['response_body']},
+                    'JobID': {'S': job_id},
+                    'Timestamp': {'N': str(timestamp)}
                 }
             }
         })
@@ -97,7 +99,7 @@ class MonitorAPI():
 def handler(event, context):
     # Extract API tests from the event
     api_tests = event.get('API-Test')
-
+    job_id = event.get('job_id')
     # Check if API tests are provided
     if not api_tests:
         return {
@@ -138,7 +140,7 @@ def handler(event, context):
     upload_logs_to_s3(api_results, os.environ['S3_BUCKET_NAME'], key)
 
     # Write API response data to DynamoDB
-    write_to_db(api_results)
+    write_to_db(api_results, job_id)
 
     return {
         'statusCode': 200,
