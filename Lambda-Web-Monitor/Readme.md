@@ -56,7 +56,7 @@ Pass the url as a json
 
 ```
 {
-  "url": "https://www.pfizer.com",
+  "url": "https://www.devopsblog.org",
 }
 ```
 
